@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Semáforo Inteligente — Teachable Machine + micro:bit</title>
+
+  <!-- Bibliotecas oficiais usadas pelo exemplo de Pose do Teachable Machine -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8.3/dist/teachablemachine-pose.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --card: #ffffff;
+      --text: #172033;
+      --muted: #64748b;
+      --border: #dbe2ea;
+      --ok: #15803d;
+      --warn: #b45309;
+      --bad: #b91c1c;
+      --blue: #1d4ed8;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 30px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      margin: 0 0 22px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px;
+      box-shadow: 0 3px 12px rgba(15, 23, 42, 0.06);
+    }
+
+    .full { grid-column: 1 / -1; }
+
+    label {
+      display: block;
+      font-weight: 700;
+      margin-bottom: 7px;
+    }
+
+    input[type="url"] {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 15px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 11px 15px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      margin: 8px 8px 0 0;
+    }
+
+    .primary { background: var(--blue); color: #fff; }
+    .secondary { background: #e2e8f0; color: #0f172a; }
+    .danger { background: #fee2e2; color: #991b1b; }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .status {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #f1f5f9;
+      color: #334155;
+      min-height: 42px;
+    }
+
+    .status.ok {
+      background: #dcfce7;
+      color: var(--ok);
+    }
+
+    .status.warn {
+      background: #fef3c7;
+      color: var(--warn);
+    }
+
+    .status.bad {
+      background: #fee2e2;
+      color: var(--bad);
+    }
+
+    .camera-area {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 340px;
+      background: #0f172a;
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    canvas {
+      width: min(100%, 400px);
+      height: auto;
+      display: block;
+    }
+
+    .result {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .metric {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      background: #fff;
+    }
+
+    .metric small {
+      display: block;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+
+    .metric strong {
+      font-size: 20px;
+    }
+
+    .lamp {
+      width: 22px;
+      height: 22px;
+      display: inline-block;
+      border-radius: 50%;
+      vertical-align: middle;
+      margin-right: 7px;
+      background: #cbd5e1;
+      border: 1px solid #94a3b8;
+    }
+
+    .lamp.red.active { background: #ef4444; }
+    .lamp.yellow.active { background: #facc15; }
+    .lamp.green.active { background: #22c55e; }
+
+    .instructions {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .instructions li {
+      margin-bottom: 7px;
+    }
+
+    .tiny {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .log {
+      margin: 0;
+      max-height: 180px;
+      overflow: auto;
+      background: #0b1220;
+      color: #dbeafe;
+      border-radius: 12px;
+      padding: 12px;
+      font: 12px/1.45 Consolas, monospace;
+      white-space: pre-wrap;
+    }
+
+    @media (max-width: 800px) {
+      .grid { grid-template-columns: 1fr; }
+      .full { grid-column: auto; }
+      .result { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <h1>🚦 Semáforo Inteligente</h1>
+    <p class="subtitle">Teachable Machine → Chrome → micro:bit → LEDs</p>
+
+    <div class="grid">
+      <section class="card">
+        <h2>1. Carregar a IA</h2>
+        <label for="modelUrl">URL do modelo de Pose</label>
+        <input id="modelUrl" type="url"
+               placeholder="https://teachablemachine.withgoogle.com/models/SEU_MODELO/">
+        <button id="loadModel" class="primary">Carregar IA</button>
+        <button id="startCamera" class="secondary" disabled>Iniciar câmera</button>
+        <div id="modelStatus" class="status">Nenhum modelo carregado.</div>
+        <p class="tiny">
+          No Teachable Machine, use três classes com estes nomes:
+          <strong>VERMELHO</strong>, <strong>AMARELO</strong> e <strong>VERDE</strong>.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>2. Conectar o micro:bit</h2>
+        <button id="connect" class="primary">Conectar micro:bit</button>
+        <button id="disconnect" class="danger" disabled>Desconectar</button>
+        <div id="serialStatus" class="status">Micro:bit não conectado.</div>
+        <p class="tiny">
+          O Chrome pedirá para escolher uma porta serial. Conecte o micro:bit por USB
+          e escolha a porta correspondente.
+        </p>
+      </section>
+
+      <section class="card full">
+        <h2>3. Câmera e reconhecimento</h2>
+        <div class="camera-area">
+          <canvas id="canvas" width="400" height="400"></canvas>
+        </div>
+
+        <div class="result">
+          <div class="metric">
+            <small>IA detectou</small>
+            <strong id="predictedClass">—</strong>
+          </div>
+          <div class="metric">
+            <small>Confiança</small>
+            <strong id="confidence">—</strong>
+          </div>
+          <div class="metric">
+            <small>Último comando enviado</small>
+            <strong id="lastCommand">—</strong>
+          </div>
+        </div>
+
+        <div class="status" id="decisionStatus">
+          Aguardando modelo e câmera.
+        </div>
+
+        <h3>Semáforo esperado</h3>
+        <div>
+          <span class="lamp red" id="lampRed"></span> VERMELHO
+          &nbsp;&nbsp;
+          <span class="lamp yellow" id="lampYellow"></span> AMARELO
+          &nbsp;&nbsp;
+          <span class="lamp green" id="lampGreen"></span> VERDE
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Modo de teste</h2>
+        <button class="secondary manual" data-command="VERMELHO">Testar vermelho</button>
+        <button class="secondary manual" data-command="AMARELO">Testar amarelo</button>
+        <button class="secondary manual" data-command="VERDE">Testar verde</button>
+        <p class="tiny">
+          Use estes botões antes do teste com IA. Se os três comandos funcionarem,
+          o circuito e o programa do micro:bit estão prontos.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>Registro técnico</h2>
+        <pre class="log" id="log"></pre>
+      </section>
+
+      <section class="card full">
+        <h2>Como usar na aula</h2>
+        <ol class="instructions">
+          <li>Os alunos criam e treinam um modelo de Pose no Teachable Machine.</li>
+          <li>As classes devem se chamar exatamente <strong>VERMELHO</strong>, <strong>AMARELO</strong> e <strong>VERDE</strong>.</li>
+          <li>Clique em <strong>Carregar IA</strong> e permita o uso da câmera quando o navegador pedir.</li>
+          <li>Conecte o micro:bit por USB e clique em <strong>Conectar micro:bit</strong>.</li>
+          <li>Faça os três gestos e observe o LED correspondente.</li>
+          <li>Para testar o circuito antes da IA, use os três botões de <strong>Modo de teste</strong>.</li>
+        </ol>
+        <p class="tiny">
+          Para Web Serial, a página precisa rodar em um contexto seguro (por exemplo,
+          HTTPS ou localhost) e a conexão deve ser iniciada por uma ação do usuário.
+        </p>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    // ==========================================================
+    // CONFIGURAÇÃO
+    // ==========================================================
+    const CONFIDENCE_THRESHOLD = 0.80;
+    const SAME_CLASS_REQUIRED = 3;
+    const SEND_COOLDOWN_MS = 700;
+
+    let model = null;
+    let webcam = null;
+    let maxPredictions = 0;
+    let animationId = null;
+
+    let serialPort = null;
+    let serialWriter = null;
+
+    let candidateClass = "";
+    let candidateCount = 0;
+    let lastSentClass = "";
+    let lastSentAt = 0;
+
+    const COMMANDS = {
+      "VERMELHO": "VERMELHO",
+      "AMARELO": "AMARELO",
+      "VERDE": "VERDE"
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    function log(message) {
+      const now = new Date().toLocaleTimeString();
+      $("log").textContent += `[${now}] ${message}\n`;
+      $("log").scrollTop = $("log").scrollHeight;
+    }
+
+    function setStatus(id, message, type = "") {
+      const el = $(id);
+      el.textContent = message;
+      el.className = "status" + (type ? " " + type : "");
+    }
+
+    function normalizeLabel(label) {
+      return String(label || "").trim().toUpperCase();
+    }
+
+    function clearLamps() {
+      $("lampRed").classList.remove("active");
+      $("lampYellow").classList.remove("active");
+      $("lampGreen").classList.remove("active");
+    }
+
+    function showLamp(command) {
+      clearLamps();
+      if (command === "VERMELHO") $("lampRed").classList.add("active");
+      if (command === "AMARELO") $("lampYellow").classList.add("active");
+      if (command === "VERDE") $("lampGreen").classList.add("active");
+    }
+
+    function normalizeModelUrl(url) {
+      let value = String(url || "").trim();
+      if (!value) throw new Error("Digite a URL do modelo.");
+
+      if (!value.endsWith("/")) value += "/";
+      if (!value.startsWith("https://teachablemachine.withgoogle.com/models/")) {
+        throw new Error("Use a URL do modelo do Teachable Machine.");
+      }
+      return value;
+    }
+
+    // ==========================================================
+    // TEACHABLE MACHINE
+    // ==========================================================
+    async function loadModel() {
+      try {
+        const url = normalizeModelUrl($("modelUrl").value);
+
+        setStatus("modelStatus", "Carregando modelo...", "warn");
+        log("Carregando modelo: " + url);
+
+        const modelURL = url + "model.json";
+        const metadataURL = url + "metadata.json";
+
+        model = await tmPose.load(modelURL, metadataURL);
+        maxPredictions = model.getTotalClasses();
+
+        if (maxPredictions !== 3) {
+          log("Aviso: o modelo possui " + maxPredictions + " classes. O projeto espera 3.");
+        }
+
+        setStatus("modelStatus", `Modelo carregado (${maxPredictions} classes).`, "ok");
+        $("startCamera").disabled = false;
+
+        // Checagem das classes.
+        log("Modelo carregado com sucesso.");
+      } catch (error) {
+        console.error(error);
+        setStatus("modelStatus", "Erro ao carregar o modelo: " + error.message, "bad");
+        log("ERRO modelo: " + error.message);
+      }
+    }
+
+    async function startCamera() {
+      if (!model) {
+        setStatus("modelStatus", "Carregue o modelo primeiro.", "warn");
+        return;
+      }
+
+      try {
+        if (webcam) {
+          webcam.stop();
+        }
+
+        webcam = new tmPose.Webcam(400, 400, true);
+        await webcam.setup();
+        await webcam.play();
+
+        const canvas = $("canvas");
+        canvas.width = 400;
+        canvas.height = 400;
+
+        $("startCamera").disabled = true;
+        setStatus("decisionStatus", "Câmera ativa. Faça um dos três gestos.", "ok");
+        log("Câmera iniciada.");
+
+        cancelAnimationFrame(animationId);
+        animationId = requestAnimationFrame(loop);
+      } catch (error) {
+        console.error(error);
+        setStatus("decisionStatus", "Não foi possível iniciar a câmera: " + error.message, "bad");
+        log("ERRO câmera: " + error.message);
+      }
+    }
+
+    async function loop() {
+      if (!webcam || !model) return;
+
+      webcam.update();
+      await predict();
+      animationId = requestAnimationFrame(loop);
+    }
+
+    async function predict() {
+      try {
+        const canvas = $("canvas");
+
+        const { pose, posenetOutput } = await model.estimatePose(webcam.canvas);
+        const prediction = await model.predict(posenetOutput);
+
+        let best = prediction[0];
+        for (const p of prediction) {
+          if (p.probability > best.probability) best = p;
+        }
+
+        const label = normalizeLabel(best.className);
+        const probability = best.probability;
+
+        $("predictedClass").textContent = label || "—";
+        $("confidence").textContent = (probability * 100).toFixed(0) + "%";
+
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(webcam.canvas, 0, 0);
+
+        if (pose) {
+          tmPose.drawKeypoints(pose.keypoints, 0.5, ctx);
+          tmPose.drawSkeleton(pose.keypoints, 0.5, ctx);
+        }
+
+        if (!COMMANDS[label]) {
+          setStatus(
+            "decisionStatus",
+            "Classe reconhecida não mapeada. Use VERMELHO, AMARELO ou VERDE.",
+            "warn"
+          );
+          return;
+        }
+
+        if (probability < CONFIDENCE_THRESHOLD) {
+          candidateClass = "";
+          candidateCount = 0;
+          setStatus(
+            "decisionStatus",
+            `Aguardando confiança mínima de ${(CONFIDENCE_THRESHOLD * 100).toFixed(0)}%.`,
+            "warn"
+          );
+          return;
+        }
+
+        if (label === candidateClass) {
+          candidateCount++;
+        } else {
+          candidateClass = label;
+          candidateCount = 1;
+        }
+
+        if (candidateCount >= SAME_CLASS_REQUIRED) {
+          const now = Date.now();
+
+          if (label !== lastSentClass || (now - lastSentAt) >= SEND_COOLDOWN_MS) {
+            const sent = await sendCommand(label);
+
+            if (sent) {
+              lastSentClass = label;
+              lastSentAt = now;
+            }
+          }
+        }
+      } catch (error) {
+        console.error(error);
+        setStatus("decisionStatus", "Erro na previsão: " + error.message, "bad");
+        log("ERRO previsão: " + error.message);
+      }
+    }
+
+    // ==========================================================
+    // MICRO:BIT / WEB SERIAL
+    // ==========================================================
+    function serialSupported() {
+      return "serial" in navigator;
+    }
+
+    async function connectMicrobit() {
+      if (!serialSupported()) {
+        setStatus(
+          "serialStatus",
+          "Este navegador não oferece Web Serial. Use Chrome/Chromium compatível.",
+          "bad"
+        );
+        return false;
+      }
+
+      try {
+        serialPort = await navigator.serial.requestPort();
+
+        // O micro:bit usa comunicação serial USB. 115200 é um valor padrão
+        // apropriado para este projeto.
+        await serialPort.open({ baudRate: 115200 });
+
+        serialWriter = serialPort.writable.getWriter();
+
+        setStatus("serialStatus", "Micro:bit conectado.", "ok");
+        $("connect").disabled = true;
+        $("disconnect").disabled = false;
+
+        log("Micro:bit conectado.");
+        return true;
+      } catch (error) {
+        console.error(error);
+        setStatus("serialStatus", "Não foi possível conectar: " + error.message, "bad");
+        log("ERRO serial: " + error.message);
+        return false;
+      }
+    }
+
+    async function sendCommand(command) {
+      if (!COMMANDS[command]) return false;
+
+      if (!serialWriter) {
+        setStatus(
+          "serialStatus",
+          "Conecte o micro:bit antes de enviar comandos.",
+          "warn"
+        );
+        return false;
+      }
+
+      try {
+        const text = COMMANDS[command] + "\n";
+        const data = new TextEncoder().encode(text);
+
+        await serialWriter.write(data);
+
+        $("lastCommand").textContent = command;
+        showLamp(command);
+
+        setStatus("serialStatus", `Comando enviado: ${command}`, "ok");
+        log("Enviado → " + command);
+        return true;
+      } catch (error) {
+        console.error(error);
+        setStatus("serialStatus", "Erro ao enviar comando: " + error.message, "bad");
+        log("ERRO envio: " + error.message);
+        return false;
+      }
+    }
+
+    async function disconnectMicrobit() {
+      try {
+        if (serialWriter) {
+          serialWriter.releaseLock();
+          serialWriter = null;
+        }
+
+        if (serialPort) {
+          await serialPort.close();
+          serialPort = null;
+        }
+
+        $("connect").disabled = false;
+        $("disconnect").disabled = true;
+
+        setStatus("serialStatus", "Micro:bit desconectado.");
+        log("Micro:bit desconectado.");
+      } catch (error) {
+        console.error(error);
+        setStatus("serialStatus", "Erro ao desconectar: " + error.message, "bad");
+        log("ERRO desconexão: " + error.message);
+      }
+    }
+
+    // ==========================================================
+    // EVENTOS
+    // ==========================================================
+    $("loadModel").addEventListener("click", loadModel);
+    $("startCamera").addEventListener("click", startCamera);
+    $("connect").addEventListener("click", connectMicrobit);
+    $("disconnect").addEventListener("click", disconnectMicrobit);
+
+    document.querySelectorAll(".manual").forEach(button => {
+      button.addEventListener("click", async () => {
+        await sendCommand(button.dataset.command);
+      });
+    });
+
+    window.addEventListener("beforeunload", async () => {
+      try {
+        if (webcam) webcam.stop();
+        if (serialWriter) serialWriter.releaseLock();
+        if (serialPort) await serialPort.close();
+      } catch (_) {}
+    });
+
+    // Aviso inicial.
+    if (!serialSupported()) {
+      setStatus(
+        "serialStatus",
+        "Web Serial não está disponível neste navegador. Use Chrome/Chromium compatível.",
+        "warn"
+      );
+      log("Web Serial indisponível.");
+    } else {
+      log("Web Serial disponível.");
+    }
+  </script>
+</body>
+</html>
